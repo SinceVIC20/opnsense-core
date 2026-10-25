@@ -85,7 +85,7 @@ class SanitizeFilter
 
     protected function filter_version($input)
     {
-        return preg_replace('/[^0-9a-zA-Z\.]/', '', $input);
+        return preg_replace('/[^0-9a-zA-Z\._]/', '', $input);
     }
 
     protected function filter_query($input)
