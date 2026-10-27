@@ -282,6 +282,134 @@ class BaseWidget {
         return `${value.toFixed(decimals)} ${fileSizeTypes[0]}${suffix}`;
     }
 
+    /* A picture of the widget as shown, copied for pasting and saved as a
+     * PNG. Drawn from the page itself, so it needs nothing from outside:
+     * every shown element's background, borders, canvas and text where the
+     * browser placed them, without the buttons in the corner. */
+    async _saveImage(button) {
+        const panel = $(`.widget-${this.id}`)[0];
+        const box = panel.getBoundingClientRect();
+        const scale = Math.max(window.devicePixelRatio || 1, 2);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(box.width * scale);
+        canvas.height = Math.round(box.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+
+        const clear = (color) => !color || color === 'transparent' || /rgba\(.*,\s*0\)$/.test(color);
+        // the first background up from the widget, as the panel's own may be clear
+        let back = null;
+        for (let el = panel; el && clear(back); el = el.parentElement) {
+            back = getComputedStyle(el).backgroundColor;
+        }
+        ctx.fillStyle = clear(back) ? '#ffffff' : back;
+        ctx.fillRect(0, 0, box.width, box.height);
+
+        // older browsers: laid out, and neither hidden nor see-through
+        const shown = (el) => el.checkVisibility ?
+            el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}) :
+            el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' &&
+            parseFloat(getComputedStyle(el).opacity) > 0;
+        const skip = '.link-handle, .close-handle, .edit-handle, .widget-image-skip, .ui-resizable-handle, i';
+        const draw = (el, clip) => {
+            if (el.matches(skip) || !shown(el)) {
+                return;
+            }
+            const style = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            const x = r.left - box.left, y = r.top - box.top;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(clip.x, clip.y, clip.w, clip.h);
+            ctx.clip();
+            const radius = parseFloat(style.borderTopLeftRadius) || 0;
+            if (!clear(style.backgroundColor)) {
+                ctx.fillStyle = style.backgroundColor;
+                ctx.beginPath();
+                ctx.roundRect ? ctx.roundRect(x, y, r.width, r.height, radius) : ctx.rect(x, y, r.width, r.height);
+                ctx.fill();
+            }
+            const sides = ['Top', 'Right', 'Bottom', 'Left'].map(side => [
+                parseFloat(style[`border${side}Width`]) || 0, style[`border${side}Color`], style[`border${side}Style`]
+            ]);
+            const line = ([width, color, kind]) => width > 0 && kind !== 'none' && !clear(color);
+            if (sides.every(side => line(side) && side[0] === sides[0][0] && side[1] === sides[0][1])) {
+                ctx.strokeStyle = sides[0][1];
+                ctx.lineWidth = sides[0][0];
+                const half = sides[0][0] / 2;
+                ctx.beginPath();
+                ctx.roundRect ? ctx.roundRect(x + half, y + half, r.width - 2 * half, r.height - 2 * half, radius) :
+                    ctx.rect(x + half, y + half, r.width - 2 * half, r.height - 2 * half);
+                ctx.stroke();
+            } else {
+                const [top, right, bottom, left] = sides;
+                const strip = (side, sx, sy, sw, sh) => {
+                    if (line(side)) {
+                        ctx.fillStyle = side[1];
+                        ctx.fillRect(sx, sy, sw, sh);
+                    }
+                };
+                strip(top, x, y, r.width, top[0]);
+                strip(right, x + r.width - right[0], y, right[0], r.height);
+                strip(bottom, x, y + r.height - bottom[0], r.width, bottom[0]);
+                strip(left, x, y, left[0], r.height);
+            }
+            if (el instanceof HTMLCanvasElement && el.width > 0 && el.height > 0) {
+                ctx.drawImage(el, x, y, r.width, r.height);
+            }
+            // text word by word, so wrapped and spaced text lands where it shows
+            ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            ctx.fillStyle = style.color;
+            ctx.textBaseline = 'alphabetic';
+            if ('letterSpacing' in ctx) {
+                ctx.letterSpacing = style.letterSpacing === 'normal' ? '0px' : style.letterSpacing;
+            }
+            const range = document.createRange();
+            el.childNodes.forEach((node) => {
+                if (node.nodeType !== Node.TEXT_NODE) {
+                    return;
+                }
+                for (const word of node.textContent.matchAll(/\S+/g)) {
+                    range.setStart(node, word.index);
+                    range.setEnd(node, word.index + word[0].length);
+                    const rect = range.getClientRects()[0];
+                    if (rect) {
+                        const ascent = ctx.measureText(word[0]).fontBoundingBoxAscent ?? rect.height * 0.8;
+                        ctx.fillText(word[0], rect.left - box.left, rect.top - box.top + ascent);
+                    }
+                }
+            });
+            ctx.restore();
+            // children only show inside a box that cuts off what overflows it
+            let inner = clip;
+            if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+                const left = Math.max(clip.x, x), top = Math.max(clip.y, y);
+                inner = {x: left, y: top, w: Math.max(0, Math.min(clip.x + clip.w, x + r.width) - left),
+                    h: Math.max(0, Math.min(clip.y + clip.h, y + r.height) - top)};
+            }
+            Array.from(el.children).forEach(child => draw(child, inner));
+        };
+        draw(panel, {x: 0, y: 0, w: box.width, h: box.height});
+
+        const blob = new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        try {
+            // for pasting straight into a chat
+            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+        } catch (e) { /* not copied then, still saved */ }
+        const stamp = new Date().toLocaleString('sv').replace(/:/g, '.');
+        const title = $(`#${this.id}-title`).text().trim() || this.id;
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await blob);
+        link.download = `${title} ${stamp}.png`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+        // a moment's tick on the button to say it's done
+        if (button) {
+            $(button).removeClass('fa-camera').addClass('fa-check');
+            setTimeout(() => $(button).removeClass('fa-check').addClass('fa-camera'), 1500);
+        }
+    }
+
     sanitizeSelector(selector) {
         return String(selector).replace(/[:/.=+]/gi, '__');
     }
