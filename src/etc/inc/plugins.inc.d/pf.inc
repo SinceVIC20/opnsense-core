@@ -61,7 +61,40 @@ function pf_cron()
     $jobs = [];
 
     if ((new OPNsense\Firewall\Filter(true))->hasSchedule()) {
-        $jobs[]['autocron'] = ['/usr/bin/logger "reload filter for configured schedules" ; /usr/local/etc/rc.filter_configure', '1,16,31,46'];
+        $cmd = '/usr/bin/logger "reload filter for configured schedules" ; /usr/local/etc/rc.filter_configure';
+        /*
+         * A schedule only changes a rule when a time range starts or ends,
+         * or at midnight for its days, so reload at those minutes only.
+         * An end of 23:59 is how the GUI says end of day and is covered by
+         * midnight. Keep the old 15 minute interval for times we cannot parse.
+         */
+        $hours = [0 => [0]];
+        foreach ($config['schedules']['schedule'] ?? [] as $sched) {
+            foreach ($sched['timerange'] ?? [] as $timeday) {
+                if (empty($timeday['hour'])) {
+                    continue;
+                }
+                foreach (explode('-', $timeday['hour']) as $i => $time) {
+                    if (!preg_match('/^\s*(\d{1,2}):(\d{1,2})\s*$/', $time, $m) || $m[1] > 24 || $m[2] > 59) {
+                        $hours = null;
+                        break 3;
+                    }
+                    if ($i == 1 && $m[1] == 23 && $m[2] == 59) {
+                        continue;
+                    }
+                    $hours[(int)$m[2]][] = (int)$m[1] % 24;
+                }
+            }
+        }
+        if ($hours === null) {
+            $jobs[]['autocron'] = [$cmd, '1,16,31,46'];
+        } else {
+            foreach ($hours as $minute => $list) {
+                $list = array_unique($list);
+                sort($list);
+                $jobs[]['autocron'] = [$cmd, (string)$minute, implode(',', $list)];
+            }
+        }
     }
 
     /* bogons fetch always set in default config.xml */
