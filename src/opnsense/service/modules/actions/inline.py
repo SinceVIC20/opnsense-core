@@ -23,6 +23,8 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 """
+import re
+import subprocess
 import traceback
 from .. import template
 from .. import config
@@ -86,6 +88,19 @@ class Action(BaseAction):
                     return 'OK'
                 else:
                     return 'ERR'
+            elif self.command == 'sysctl.values':
+                # read here instead of starting a script for every dashboard
+                # refresh, output as scripts/system/sysctl.py --values
+                import json
+                result = {}
+                names = [x for x in act_parameters.split(',') if re.match(r'^[\w.%-]+$', x)]
+                if names:
+                    sp = subprocess.run(['/sbin/sysctl', '-i'] + names, capture_output=True, text=True)
+                    for line in sp.stdout.split("\n"):
+                        parts = line.strip().split(": ", 1)
+                        if len(parts) > 1:
+                            result[parts[0]] = parts[1].strip()
+                return json.dumps(result)
             elif self.command == 'configd.lookup':
                 from ..processhandler import ActionHandler
                 act_handler = ActionHandler()
