@@ -562,10 +562,12 @@ class WidgetManager  {
             }
         }
 
+        let lastTick = Date.now();
         await tick();
         const refresh = async () => {
             // a dashboard in a background tab doesn't need fresh data
             if (!document.hidden) {
+                lastTick = Date.now();
                 await tick();
             }
         };
@@ -579,9 +581,12 @@ class WidgetManager  {
             refresh();
         }, offset);
         this.widgetTickRoutines[widget.id] = routine;
-        // catch up as soon as the dashboard is shown again
+        // catch up when the dashboard is shown again, if a refresh fell due
+        // while it was hidden (some widgets fetch from the internet)
         document.addEventListener('visibilitychange', async () => {
-            if (!document.hidden && this.widgetTickRoutines[widget.id] === routine) {
+            if (!document.hidden && this.widgetTickRoutines[widget.id] === routine &&
+                Date.now() - lastTick >= widget.tickTimeout * 1000) {
+                lastTick = Date.now();
                 await tick();
             }
         });
