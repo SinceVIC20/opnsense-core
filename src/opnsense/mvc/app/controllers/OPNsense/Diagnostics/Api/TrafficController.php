@@ -31,6 +31,7 @@ namespace OPNsense\Diagnostics\Api;
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Config;
 use OPNsense\Core\Backend;
+use OPNsense\Core\Legacy;
 
 /**
  * Class TrafficController
@@ -44,8 +45,8 @@ class TrafficController extends ApiControllerBase
      */
     public function InterfaceAction()
     {
-        $response = (new Backend())->configdRun('interface show traffic');
-        return json_decode($response, true);
+        /* polled by the dashboard: run here rather than start a script */
+        return json_decode(Legacy::run('/usr/local/opnsense/scripts/interfaces/traffic_stats.php'), true);
     }
 
     public function streamAction($poll_interval = 1)
