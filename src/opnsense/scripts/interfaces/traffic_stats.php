@@ -55,10 +55,13 @@ function map_ifs($ifs, $data)
 
 if (isset($argv[1])) {
     $intfs = legacy_config_get_interfaces(["virtual" => false, "enable" => true]);
-    $prev = legacy_interface_stats();
+    /* one reader for the whole stream instead of starting ifinfo every second */
+    $reader = popen('/usr/local/opnsense/scripts/interfaces/if_counters.py ' .
+        escapeshellarg($argv[1] <= 1 ? 1 : $argv[1]), 'r');
+    $prev = json_decode(fgets($reader), true);
 
-    while (1) {
-        $interfaces = $tmp = legacy_interface_stats();
+    while (($line = fgets($reader)) !== false) {
+        $interfaces = $tmp = json_decode($line, true);
 
         $keys = [
             'bytes received',
@@ -83,7 +86,6 @@ if (isset($argv[1])) {
         echo 'event: message' . PHP_EOL;
         echo 'data: ' . json_encode($result) . PHP_EOL . PHP_EOL;
         flush();
-        sleep($argv[1] <= 1 ? 1 : $argv[1]);
     }
 } else {
     $result = array("interfaces" => array());
