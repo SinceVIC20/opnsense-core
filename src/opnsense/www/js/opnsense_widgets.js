@@ -410,6 +410,7 @@
             this.destroyed = false;
             this.tickRunning = false;
             this.refreshPending = false;
+            this.refreshMissed = false;
 
             const config = {
                 ...persistedConfig,
@@ -555,6 +556,11 @@
         onVisibilityChanged(visible) {
             if (!this.destroyed) {
                 this.widget.onVisibilityChanged(visible);
+                // catch up on return only if a refresh fell due while hidden
+                if (visible && this.refreshMissed) {
+                    this.refreshMissed = false;
+                    this.refresh();
+                }
             }
         }
 
@@ -575,6 +581,7 @@
 
             clearTimeout(this.tickTimer);
             this.tickTimer = null;
+            this.refreshMissed = false;
             if (this.tickRunning) {
                 this.refreshPending = true;
                 return;
@@ -659,11 +666,21 @@
                     global.queueMicrotask(() => this.refresh());
                 } else if (!this.destroyed) {
                     this.tickTimer = setTimeout(
-                        () => this.refresh(),
+                        () => this._scheduledRefresh(),
                         this.widget.tickTimeout * 1000
                     );
                 }
             }
+        }
+
+        _scheduledRefresh() {
+            // a dashboard in a background tab doesn't need fresh data
+            if (document.hidden) {
+                this.tickTimer = null;
+                this.refreshMissed = true;
+                return;
+            }
+            this.refresh();
         }
 
         _handleError(error) {

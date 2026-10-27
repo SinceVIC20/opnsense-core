@@ -27,6 +27,7 @@
 export default class Gateways extends BaseTableWidget {
     constructor(config) {
         super(config);
+        this.tickTimeout = 30; // dpinger averages over longer than this
 
         this.configurable = true;
         this.cachedGateways = []; // prevent fetch when loading options
