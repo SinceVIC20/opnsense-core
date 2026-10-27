@@ -27,6 +27,7 @@
 export default class InterfaceStatistics extends BaseTableWidget {
     constructor() {
         super();
+        this.tickTimeout = 30; // totals; the Traffic widget streams live rates
 
         this.chart = null;
         this.labels = [];
