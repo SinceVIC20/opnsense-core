@@ -120,7 +120,8 @@ if args.e:
     last_message_stamp = time.time()
     stashed_lines = list()
     while True:
-        rlist, _, _ = select([sys.stdin], [], [], args.t)
+        # with nothing waiting to be sent, sleep until the next line
+        rlist, _, _ = select([sys.stdin], [], [], args.t if stashed_lines else None)
         if rlist:
             last_message_stamp = time.time()
             r_line = sys.stdin.readline()
