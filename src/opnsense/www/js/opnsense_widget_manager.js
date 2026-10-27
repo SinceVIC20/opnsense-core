@@ -563,17 +563,25 @@ class WidgetManager  {
         }
 
         await tick();
-        const interval = setInterval(async () => {
+        const refresh = async () => {
             // a dashboard in a background tab doesn't need fresh data
             if (!document.hidden) {
                 await tick();
             }
-        }, widget.tickTimeout * 1000);
-        // store the reference to the tick routine so we can clear it later on widget removal
-        this.widgetTickRoutines[widget.id] = interval;
+        };
+        // Widgets loaded together would all refresh on the same second, a
+        // burst of scripts on the firewall: start each one a little later.
+        const offset = (Object.keys(this.widgetTickRoutines).length * 2000) % (widget.tickTimeout * 1000);
+        let routine = setTimeout(() => {
+            routine = setInterval(refresh, widget.tickTimeout * 1000);
+            // store the reference to the tick routine so we can clear it later on widget removal
+            this.widgetTickRoutines[widget.id] = routine;
+            refresh();
+        }, offset);
+        this.widgetTickRoutines[widget.id] = routine;
         // catch up as soon as the dashboard is shown again
         document.addEventListener('visibilitychange', async () => {
-            if (!document.hidden && this.widgetTickRoutines[widget.id] === interval) {
+            if (!document.hidden && this.widgetTickRoutines[widget.id] === routine) {
                 await tick();
             }
         });
@@ -892,6 +900,8 @@ class WidgetManager  {
     }
 
     _onWidgetClose(id) {
+        // a timeout until its first refresh, an interval after
+        clearTimeout(this.widgetTickRoutines[id]);
         clearInterval(this.widgetTickRoutines[id]);
         delete this.widgetTickRoutines[id];
         if (id in this.widgetClasses) this.widgetClasses[id].onWidgetClose();
