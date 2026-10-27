@@ -39,6 +39,42 @@ use OPNsense\Core\Legacy;
 class ServiceController extends ApiControllerBase
 {
     /**
+     * The status message service_message() gives, with the checks it makes
+     * through pgrep answered from one process list for all services.
+     * @param array $service service as plugins_services() returns it
+     * @param array $procs pid => [name, seconds running]
+     * @return string
+     */
+    private static function serviceMessage($service, $procs)
+    {
+        $pid = '';
+        if (!empty($service['nocheck'])) {
+            $status = true;
+        } elseif (isset($service['pidfile'])) {
+            /* pgrep -nF: the pid in the file is a live process */
+            $content = file_exists($service['pidfile']) ? trim(@file_get_contents($service['pidfile']) ?? '') : '';
+            $status = isset($procs[(int)strtok($content, "\n")]);
+            if ($status) {
+                $pid = ' as pid ' . $content;
+            }
+        } else {
+            /* pgrep -anx: the newest process of exactly this name */
+            $newest = null;
+            foreach ($procs as $p => $proc) {
+                if ($proc[0] === $service['name'] && ($newest === null || $proc[1] < $procs[$newest][1])) {
+                    $newest = $p;
+                }
+            }
+            $status = $newest !== null;
+            if ($status) {
+                $pid = ' as pid ' . $newest;
+            }
+        }
+
+        return sprintf('%s is %s.', service_name($service), $status ? 'running' . $pid : 'not running');
+    }
+
+    /**
      * Search service entries
      * @return array
      */
@@ -46,12 +82,20 @@ class ServiceController extends ApiControllerBase
     {
         /* polled by the dashboard: as pluginctl -S, without starting it */
         Legacy::load(['config.inc', 'util.inc', 'system.inc', 'interfaces.inc', 'filter.inc', 'auth.inc']);
+        $procs = [];
+        exec('/bin/ps -ax -o pid= -o etimes= -o comm=', $lines);
+        foreach ($lines as $line) {
+            $fields = preg_split('/\s+/', trim($line), 3);
+            if (count($fields) == 3) {
+                $procs[(int)$fields[0]] = [$fields[2], (int)$fields[1]];
+            }
+        }
         $data = [];
         foreach (plugins_services() as $service) {
             if (!empty($service['noshow'])) {
                 continue;
             }
-            $service['status'] = service_message($service);
+            $service['status'] = self::serviceMessage($service, $procs);
             $data[] = $service;
         }
         $records = [];
