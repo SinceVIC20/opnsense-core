@@ -79,6 +79,12 @@
             <trafficin>Traffic In</trafficin>
             <trafficout>Traffic Out</trafficout>
             <interfaces>Interfaces</interfaces>
+            <switchview>Switch between one graph and separate in and out graphs</switchview>
+            <switchscale>Change scale</switchscale>
+            <image>Copy and save a picture of this widget</image>
+            <chooseinterfaces>Choose the interfaces to show</chooseinterfaces>
+            <in>In</in>
+            <out>Out</out>
         </translations>
     </traffic>
     <healthgraph>
