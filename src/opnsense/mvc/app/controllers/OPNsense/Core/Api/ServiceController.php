@@ -30,6 +30,7 @@ namespace OPNsense\Core\Api;
 
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
+use OPNsense\Core\Legacy;
 
 /**
  * Class SessionsController
@@ -43,7 +44,16 @@ class ServiceController extends ApiControllerBase
      */
     public function searchAction()
     {
-        $data = json_decode((new Backend())->configdRun('service list'), true);
+        /* polled by the dashboard: as pluginctl -S, without starting it */
+        Legacy::load(['config.inc', 'util.inc', 'system.inc', 'interfaces.inc', 'filter.inc', 'auth.inc']);
+        $data = [];
+        foreach (plugins_services() as $service) {
+            if (!empty($service['noshow'])) {
+                continue;
+            }
+            $service['status'] = service_message($service);
+            $data[] = $service;
+        }
         $records = [];
 
         if (!empty($data)) {

@@ -31,6 +31,7 @@ namespace OPNsense\Interfaces\Api;
 use OPNsense\Base\ApiControllerBase;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
+use OPNsense\Core\Legacy;
 use OPNsense\Firewall\Util;
 use OPNsense\Routing\Gateways;
 use OPNsense\Interface\Autoconf;
@@ -105,6 +106,68 @@ class OverviewController extends ApiControllerBase
         ];
     }
 
+    /**
+     * The routing table as scripts/routes/show_routes.py -n json gives it.
+     */
+    private static function routes()
+    {
+        $result = [];
+        $fieldnames = [];
+        $proto = '';
+        exec('/usr/bin/netstat -rWn', $lines);
+        foreach ($lines as $line) {
+            $fields = preg_split('/\s+/', trim($line), -1, PREG_SPLIT_NO_EMPTY);
+            if (count($fields) == 1 && $fields[0] == 'Internet:') {
+                $proto = 'ipv4';
+            } elseif (count($fields) == 1 && $fields[0] == 'Internet6:') {
+                $proto = 'ipv6';
+            } elseif (count($fields) > 2 && $fields[0] == 'Destination' && $fields[1] == 'Gateway') {
+                $fieldnames = array_map('strtolower', $fields);
+            } elseif (count($fields) > 2) {
+                $record = ['proto' => $proto];
+                foreach ($fields as $i => $field) {
+                    if (isset($fieldnames[$i])) {
+                        $record[$fieldnames[$i]] = $field;
+                    }
+                }
+                foreach ($fieldnames as $fieldname) {
+                    $record[$fieldname] = $record[$fieldname] ?? '';
+                }
+                $result[] = $record;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Primary addresses of every interface, as pluginctl -46 gives them.
+     */
+    private static function primaryAddresses($ifconfig_details)
+    {
+        global $config;
+
+        $result = [];
+        foreach (array_keys($config['interfaces'] ?? []) as $int) {
+            if (empty($config['interfaces'][$int])) {
+                continue;
+            }
+            $result[$int] = [];
+            foreach (['inet' => '4', 'inet6' => '6'] as $family => $opt) {
+                $raw = $opt === '4' ? interfaces_primary_address($int, $ifconfig_details) :
+                    interfaces_primary_address6($int, $ifconfig_details);
+                $result[$int][] = [
+                    'address' => $raw[0],
+                    'network' => $raw[1],
+                    'bits' => $raw[2],
+                    'device' => $raw[3],
+                    'interface' => $int,
+                    'family' => $family,
+                ];
+            }
+        }
+        return $result;
+    }
+
     private function parseIfInfo($interface = null, $detailed = false)
     {
         $backend = new Backend();
@@ -113,9 +176,12 @@ class OverviewController extends ApiControllerBase
         $result = [];
 
         /* abbreviated information */
-        $ifinfo = json_decode($backend->configdpRun('interface list ifconfig', [$interface]), true);
-        $routes = json_decode($backend->configdRun('interface routes list -n json'), true);
-        $ifaddr = json_decode($backend->configdRun('interface address'), true);
+        /* polled by the dashboard: gathered here rather than by three scripts */
+        Legacy::load(['config.inc', 'util.inc', 'interfaces.inc']);
+        $details = legacy_interfaces_details();
+        $ifinfo = $interface === null ? $details : legacy_interfaces_details($interface);
+        $routes = self::routes();
+        $ifaddr = self::primaryAddresses($details);
 
         /* detailed information */
         if ($detailed) {

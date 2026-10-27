@@ -32,6 +32,7 @@ use OPNsense\Base\ApiMutableModelControllerBase;
 use OPNsense\Base\UserException;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
+use OPNsense\Core\Legacy;
 use OPNsense\Core\Type;
 use OPNsense\Firewall\Util;
 
@@ -54,8 +55,10 @@ class SettingsController extends ApiMutableModelControllerBase
     public function searchGatewayAction()
     {
         $cfg = Config::getInstance()->object();
-        $ifconfig = json_decode((new Backend())->configdRun('interface list ifconfig'), true) ?? [];
-        $gateways_status = json_decode((new Backend())->configdRun('interface gateways status'), true) ?? [];
+        /* polled by the dashboard: run here rather than start two scripts */
+        Legacy::load(['config.inc', 'interfaces.inc']);
+        $ifconfig = legacy_interfaces_details() ?? [];
+        $gateways_status = json_decode(Legacy::run('/usr/local/opnsense/scripts/routes/gateway_status.php'), true) ?? [];
         $gateways = array_values($this->getModel()->gatewaysIndexedByName(true, false, true));
         $down_gateways = !empty((string)$cfg->system->gw_switch_default) ? array_map(function ($gw) {
             if (str_contains($gw['status'], 'down')) {

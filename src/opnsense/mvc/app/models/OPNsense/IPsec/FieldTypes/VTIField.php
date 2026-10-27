@@ -30,7 +30,7 @@ namespace OPNsense\IPsec\FieldTypes;
 
 use OPNsense\Base\FieldTypes\ArrayField;
 use OPNsense\Base\FieldTypes\TextField;
-use OPNsense\Core\Backend;
+use OPNsense\Core\Legacy;
 
 class VTIField extends ArrayField
 {
@@ -42,7 +42,8 @@ class VTIField extends ArrayField
     protected static function getStaticChildren()
     {
         $result = [];
-        $legacy_vtis = json_decode((new Backend())->configdRun('ipsec list legacy_vti'), true);
+        /* read whenever the IPsec model loads, the dashboard included: run here, not as a script */
+        $legacy_vtis = json_decode(Legacy::run('/usr/local/opnsense/scripts/ipsec/get_legacy_vti.php'), true);
         if (!empty($legacy_vtis)) {
             foreach ($legacy_vtis as $vti) {
                 $vti['enabled'] = '1';
