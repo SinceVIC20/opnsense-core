@@ -27,6 +27,7 @@
 export default class Interfaces extends BaseTableWidget {
     constructor() {
         super();
+        this.tickTimeout = 60; // addresses and link state rarely change
     }
 
     getGridOptions() {

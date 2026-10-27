@@ -27,6 +27,7 @@
 export default class Services extends BaseTableWidget {
     constructor() {
         super();
+        this.tickTimeout = 30; // every refresh checks each service's processes
         this.locked = false;
     }
 

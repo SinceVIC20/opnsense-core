@@ -564,10 +564,19 @@ class WidgetManager  {
 
         await tick();
         const interval = setInterval(async () => {
-            await tick();
+            // a dashboard in a background tab doesn't need fresh data
+            if (!document.hidden) {
+                await tick();
+            }
         }, widget.tickTimeout * 1000);
         // store the reference to the tick routine so we can clear it later on widget removal
         this.widgetTickRoutines[widget.id] = interval;
+        // catch up as soon as the dashboard is shown again
+        document.addEventListener('visibilitychange', async () => {
+            if (!document.hidden && this.widgetTickRoutines[widget.id] === interval) {
+                await tick();
+            }
+        });
     }
 
     _clearError(widgetId) {
@@ -884,6 +893,7 @@ class WidgetManager  {
 
     _onWidgetClose(id) {
         clearInterval(this.widgetTickRoutines[id]);
+        delete this.widgetTickRoutines[id];
         if (id in this.widgetClasses) this.widgetClasses[id].onWidgetClose();
         this.grid.removeWidget(this.widgetHTMLElements[id]);
         if (id in this.loadedModules) this.moduleDiff.push(id);
