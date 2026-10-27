@@ -111,11 +111,38 @@ function pf_cron()
             break;
     }
 
-    $jobs[]['autocron'] = [
-        '/usr/local/bin/flock -n -E 0 -o /tmp/filter_update_tables.lock ' .
-        '/usr/local/opnsense/scripts/filter/update_tables.py --quick',
-        '*'
-    ];
+    /*
+     * Refresh aliases as often as the most urgent one needs it, in minutes,
+     * matching the expiry update_tables.py gives each type.  Interface
+     * networks need no timer, a filter reload refreshes every alias.
+     */
+    $minutes = null;
+    foreach ((new \OPNsense\Firewall\Alias(true))->aliases->alias->iterateItems() as $alias) {
+        if ($alias->enabled->isEmpty()) {
+            continue;
+        }
+        $type = (string)$alias->type;
+        if (!$alias->updatefreq->isEmpty()) {
+            $need = $alias->updatefreq->asFloat() * 1440;
+        } elseif (in_array($type, ['mac', 'dynipv6host', 'authgroup'])) {
+            $need = 1;
+        } elseif ($type == 'host') {
+            $need = ($config['system']['aliasesresolveinterval'] ?? 300) / 60;
+        } elseif (in_array($type, ['geoip', 'asn'])) {
+            $need = 1440;
+        } else {
+            continue;
+        }
+        $minutes = min($minutes ?? $need, $need);
+    }
+    if ($minutes !== null) {
+        $minutes = max(1, (int)$minutes);
+        $jobs[]['autocron'] = [
+            '/usr/local/bin/flock -n -E 0 -o /tmp/filter_update_tables.lock ' .
+            '/usr/local/opnsense/scripts/filter/update_tables.py --quick',
+            $minutes == 1 ? '*' : ($minutes < 60 ? '*/' . $minutes : '0')
+        ];
+    }
 
     return $jobs;
 }
