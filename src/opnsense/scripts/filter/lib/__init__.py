@@ -24,6 +24,11 @@
     POSSIBILITY OF SUCH DAMAGE.
 """
 import asyncio
+import dns._features
+# Plain DNS only: skip loading DNS over QUIC/HTTPS and trio, which takes
+# most of the start-up time of every run when those packages are installed.
+for _feature in ('doq', 'doh', 'trio'):
+    dns._features.force(_feature, False)
 import dns.resolver
 import ipaddress
 import itertools
