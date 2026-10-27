@@ -117,7 +117,33 @@ function pf_cron()
      * networks need no timer, a filter reload refreshes every alias.
      */
     $minutes = null;
-    foreach ((new \OPNsense\Firewall\Alias(true))->aliases->alias->iterateItems() as $alias) {
+    $aliases = iterator_to_array((new \OPNsense\Firewall\Alias(true))->aliases->alias->iterateItems());
+    $names = [];
+    foreach ($aliases as $alias) {
+        $names[(string)$alias->name] = true;
+    }
+    /*
+     * A host alias only changes when it names a host to look up, as
+     * update_tables.py takes addresses, ranges and networks as they are
+     * and refreshes a nested alias as its own.
+     */
+    $lookups = function ($content) use ($names) {
+        foreach (explode("\n", $content) as $entry) {
+            $entry = trim($entry);
+            $range = explode('-', $entry);
+            if (
+                $entry === '' || strpos($entry, '/') !== false || isset($names[$entry]) ||
+                filter_var(ltrim($entry, '!'), FILTER_VALIDATE_IP) !== false ||
+                (count($range) == 2 && filter_var($range[0], FILTER_VALIDATE_IP) !== false &&
+                filter_var($range[1], FILTER_VALIDATE_IP) !== false)
+            ) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    };
+    foreach ($aliases as $alias) {
         if ($alias->enabled->isEmpty()) {
             continue;
         }
@@ -127,6 +153,9 @@ function pf_cron()
         } elseif (in_array($type, ['mac', 'dynipv6host', 'authgroup'])) {
             $need = 1;
         } elseif ($type == 'host') {
+            if (!$lookups((string)$alias->content)) {
+                continue;
+            }
             $need = ($config['system']['aliasesresolveinterval'] ?? 300) / 60;
         } elseif (in_array($type, ['geoip', 'asn'])) {
             $need = 1440;
