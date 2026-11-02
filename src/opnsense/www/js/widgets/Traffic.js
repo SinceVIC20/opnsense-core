@@ -207,7 +207,9 @@ export default class Traffic extends BaseWidget {
                         if (at !== null) {
                             ctx.fillStyle = dataset.dotColor;
                             ctx.beginPath();
-                            ctx.arc(x, at, 4, 0, 2 * Math.PI);
+                            // in to the left of the line and out to the right, their centres 0.618 of a dot
+                            // apart (the golden ratio), so both show
+                            ctx.arc(x + (dataset.src_field === 'inbytes' ? -2.47 : 2.47), at, 4, 0, 2 * Math.PI);
                             ctx.fill();
                             const value = Math.max(0, y.getValueForPixel(at));
                             // under 2 Kb the log scale's floor hides the height: the measured
