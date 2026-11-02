@@ -41,8 +41,11 @@ export default class Traffic extends BaseWidget {
         this.linkSpeeds = {};
         this.linkSpeed = 1e9;
         this.scale = 'auto';
-        this.top = 25e3;
-        // each interface's auto scale: top, when it last changed, last minute's peaks
+        this.top = 1e4;
+        // where the linear axis is drawn now, gliding toward top
+        this.shownTop = this.top;
+        this.glideAt = null;
+        // each interface's auto scale top
         this.tracks = {};
         this.selected = ['wan'];
         // the rates the header shows, read off the graph at its reference line
@@ -389,13 +392,32 @@ export default class Traffic extends BaseWidget {
         return steps;
     }
 
-    /* The auto scale's top: about e (2.5 to 3 times) apart, rounded to values
-     * whose tenths make clean lines, up to the link speed, which is the last. */
+    /* The auto scale's tops: 1, 1.5, 2, 3, 4, 5 and 7.5 times each power of
+     * ten, at most 1.5 times apart so the traffic fills at least three fifths
+     * of the height, and each with tenths that make clean lines. The link
+     * speed is the last. */
     _autoSteps(linkSpeed) {
-        const steps = [25e3, 75e3, 2e5, 5e5, 1.5e6, 4e6, 1e7, 2.5e7, 7.5e7, 2e8, 5e8, 1.5e9, 4e9, 1e10]
-            .filter(value => value < linkSpeed);
+        let steps = [];
+        for (let power = 1e4; power < linkSpeed; power *= 10) {
+            [1, 1.5, 2, 3, 4, 5, 7.5].forEach(m => m * power < linkSpeed && steps.push(m * power));
+        }
         steps.push(linkSpeed);
         return steps;
+    }
+
+    /* Move the linear axis toward its top as Smoothie Charts does, by a share
+     * of the gap each frame: quickly up, so a burst is soon in view, and
+     * gently down. The gap is a ratio, so Gb to Mb takes as long as Mb to kb,
+     * and the share goes by time, so it moves the same at any frame rate. */
+    _glide() {
+        const now = performance.now();
+        const seconds = this.glideAt === null ? 0 : Math.min((now - this.glideAt) / 1000, 1);
+        this.glideAt = now;
+        const tau = this.top > this.shownTop ? 0.15 : 0.6;
+        this.shownTop = this.top * Math.pow(this.shownTop / this.top, Math.exp(-seconds / tau));
+        if (Math.abs(this.top - this.shownTop) < this.top * 1e-3) {
+            this.shownTop = this.top;
+        }
     }
 
     _switchScale() {
@@ -425,12 +447,21 @@ export default class Traffic extends BaseWidget {
         }
         return {
             type: 'linear',
-            // the same small room below 0 and above the top
-            min: -this.top * 0.02,
-            max: this.top * 1.02,
+            // the axis ends where it is set below, not at Chart.js's own round numbers
+            bounds: 'data',
+            afterDataLimits: (axis) => {
+                this._glide();
+                // the same small room below 0 and above the top
+                axis.min = -this.shownTop * 0.02;
+                axis.max = this.shownTop * 1.02;
+            },
             afterBuildTicks: (axis) => {
-                // ten divisions of the top
-                axis.ticks = [...Array(11).keys()].map(i => ({value: this.top * i / 10}));
+                // ten divisions of a step, the one above while the axis is still coming down
+                const steps = this._autoSteps(this.linkSpeed);
+                const base = this.top >= this.shownTop ? this.top :
+                    steps.find(value => value >= this.shownTop * 0.999) ?? this.top;
+                axis.ticks = [...Array(11).keys()].map(i => ({value: base * i / 10}))
+                    .filter(tick => tick.value <= axis.max);
             },
             ticks: {
                 autoSkip: false,
@@ -442,10 +473,10 @@ export default class Traffic extends BaseWidget {
     }
 
     /* Every interface's own auto scale, worked out each second whether shown
-     * or not, so one is at its scale the moment it is selected: up at once to
-     * the step that holds all of its traffic in view when that goes past the
-     * top, down one step at a time once its last minute fits well under the
-     * next step and the scale has held for 30 seconds, so it settles gently. */
+     * or not, so one is at its scale the moment it is selected: the step that
+     * holds all of its traffic in view with a tenth to spare. It goes up as
+     * soon as the traffic needs it, and down only once the traffic would leave
+     * two fifths spare, so it doesn't flap between two steps. */
     _trackScales(rates) {
         const now = Date.now();
         // everything on screen: the window runs its delay behind, and the
@@ -461,24 +492,15 @@ export default class Traffic extends BaseWidget {
             });
         });
         Object.keys(rates).forEach((intf) => {
-            const track = this.tracks[intf] ??= {top: null, changed: 0, history: []};
-            track.history.push([now, Math.max(rates[intf].inbytes ?? 0, rates[intf].outbytes ?? 0)]);
-            track.history = track.history.filter(entry => entry[0] >= now - 60000);
+            const track = this.tracks[intf] ??= {top: null};
             const peak = peaks[intf] ?? 0;
             const steps = this._autoSteps(this._linkSpeed(intf));
-            // the smallest step holding all of it
-            const fit = steps.find(value => value >= peak) ?? steps[steps.length - 1];
-            const below = steps[steps.indexOf(track.top) - 1];
-            if (track.top === null || peak > track.top || !steps.includes(track.top)) {
-                // up only once the traffic goes past the top
-                track.top = fit;
-                track.changed = now;
-            } else if (below !== undefined && now - track.changed >= 30000 &&
-                Math.max(peak, ...track.history.map(entry => entry[1])) <= below * 0.6) {
-                // down only after a quiet minute, not just a quiet screen, and
-                // with room for the next burst under the next step
-                track.top = below;
-                track.changed = now;
+            // the smallest step holding the peak with that much spare
+            const fit = (spare) => steps.find(value => value >= peak * spare) ?? steps[steps.length - 1];
+            if (track.top === null || !steps.includes(track.top) || peak * 1.1 > track.top) {
+                track.top = fit(1.1);
+            } else if (fit(1.4) < track.top) {
+                track.top = fit(1.4);
             }
         });
     }
@@ -492,6 +514,11 @@ export default class Traffic extends BaseWidget {
                 return;
             }
             this.top = top;
+            if (!refit) {
+                return;     // the axis glides there
+            }
+            // another interface or scale starts where it belongs
+            this.shownTop = top;
         } else if (!refit) {
             return;
         }
