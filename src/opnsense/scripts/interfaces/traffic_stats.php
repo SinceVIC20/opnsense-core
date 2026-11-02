@@ -82,6 +82,23 @@ if (isset($argv[1])) {
         }
 
         $result = map_ifs($intfs, $tmp);
+
+        /* the WAN's traffic split into what the hardware forwarded and what the CPU handled */
+        $wan = $intfs['wan']['if'] ?? null;
+        if (
+            $wan !== null && isset($interfaces[$wan]['offloaded bytes received']) &&
+            isset($prev[$wan]['offloaded bytes received'])
+        ) {
+            $split = ['hw' => [], 'cpu' => []];
+            foreach (['inbytes' => 'received', 'outbytes' => 'transmitted'] as $field => $dir) {
+                $total = $tmp[$wan]["bytes {$dir}"];
+                /* a record handed back moves its counts into the interface: never more than all */
+                $hw = min(max(0, $interfaces[$wan]["offloaded bytes {$dir}"] - $prev[$wan]["offloaded bytes {$dir}"]), max(0, $total));
+                $split['hw'][$field] = $hw;
+                $split['cpu'][$field] = max(0, $total - $hw);
+            }
+            $result['offload'] = $split;
+        }
         $prev = $interfaces;
         echo 'event: message' . PHP_EOL;
         echo 'data: ' . json_encode($result) . PHP_EOL . PHP_EOL;

@@ -85,6 +85,8 @@
             <chooseinterfaces>Choose the interfaces to show</chooseinterfaces>
             <in>In</in>
             <out>Out</out>
+            <cnxhw>Cnx HW</cnxhw>
+            <cnxcpu>Cnx CPU</cnxcpu>
         </translations>
     </traffic>
     <healthgraph>

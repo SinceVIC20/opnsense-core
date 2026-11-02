@@ -345,6 +345,24 @@ export default class Traffic extends BaseWidget {
         return datasets;
     }
 
+    _isCnx(intf) {
+        return intf === 'cnx_hw' || intf === 'cnx_cpu';
+    }
+
+    /* The WAN's traffic split into what the hardware forwarded and what the
+     * CPU handled, as two more interfaces ahead of the others, where the
+     * stream has it. */
+    _withOffload(data) {
+        if (data.offload !== undefined) {
+            data.interfaces = {
+                cnx_hw: {...data.offload.hw, name: this.translations.cnxhw},
+                cnx_cpu: {...data.offload.cpu, name: this.translations.cnxcpu},
+                ...data.interfaces
+            };
+        }
+        return data;
+    }
+
     /* The selected interface's link speed, for the top of the scale. */
     _graphScale() {
         this.linkSpeed = this._linkSpeed(this.selected[0]);
@@ -353,7 +371,8 @@ export default class Traffic extends BaseWidget {
 
     // rates below 1 Mb/s are not real link speeds (PPPoE reports 64 kb/s)
     _linkSpeed(intf) {
-        const speed = this.linkSpeeds[intf] ?? 0;
+        // the WAN's split shares its link
+        const speed = this.linkSpeeds[this._isCnx(intf) ? 'wan' : intf] ?? 0;
         return speed >= 1e6 ? speed : 1e9;
     }
 
@@ -494,8 +513,10 @@ export default class Traffic extends BaseWidget {
     _graphButtons(data, page = null) {
         this.rowData = data;
         const known = Object.keys(data.interfaces);
-        // the saved order, then interfaces added since
-        this.order = this.order.filter(intf => known.includes(intf)).concat(known.filter(intf => !this.order.includes(intf)));
+        // the saved order, then interfaces added since, the WAN's split at the front
+        const added = known.filter(intf => !this.order.includes(intf));
+        this.order = added.filter(intf => this._isCnx(intf)).concat(this.order.filter(intf => known.includes(intf)),
+            added.filter(intf => !this._isCnx(intf)));
         const shown = this.order.filter(intf => !this.hidden.includes(intf));
         if (shown.length > 0 && !shown.includes(this.selected[0])) {
             this._select(shown[0]);
@@ -925,7 +946,8 @@ export default class Traffic extends BaseWidget {
         for (const dir of ['inbytes', 'outbytes']) {
             let colors = Chart.colorschemes.tableau.Classic10;
             let i = 0;
-            Object.keys(data.interfaces).forEach((intf) => {
+            // the separate graphs show the interfaces only
+            Object.keys(data.interfaces).filter(intf => !this._isCnx(intf)).forEach((intf) => {
                 let idx = i % colors.length;
                 i++;
                 this.datasets[dir].push({
@@ -983,7 +1005,7 @@ export default class Traffic extends BaseWidget {
             super.closeEventSource();
         }
 
-        const data = JSON.parse(event.data);
+        const data = this._withOffload(JSON.parse(event.data));
 
         if (!this.initialized) {
             this.initialized = this._initialize(data);
