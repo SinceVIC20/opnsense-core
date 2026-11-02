@@ -73,6 +73,48 @@ ifaddrs._fields_ = [
 libc = ctypes.CDLL('libc.so.7', use_errno=True)
 libc.getifaddrs.argtypes = [ctypes.POINTER(ctypes.POINTER(ifaddrs))]
 libc.freeifaddrs.argtypes = [ctypes.POINTER(ifaddrs)]
+libc.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+                              ctypes.c_void_p, ctypes.c_size_t]
+
+# the MAC counts each frame's checksum, the driver's own counts don't
+FCS_BYTES = 4
+
+
+def sysctl(name, size=8):
+    """A sysctl's raw value, None where there is no such sysctl."""
+    buf = ctypes.create_string_buffer(size)
+    length = ctypes.c_size_t(size)
+    if libc.sysctlbyname(name.encode(), buf, ctypes.byref(length), None, 0) != 0:
+        return None
+    return buf.raw[:length.value]
+
+
+def sysctl_u64(name):
+    raw = sysctl(name)
+    return int.from_bytes(raw, sys.byteorder) if raw is not None and len(raw) == 8 else None
+
+
+def offloaded(result):
+    """
+    Bytes the hardware forwarded in and out of each interface, where it is
+    known: on a Mono Gateway port, all it counted less what went through the
+    CPU; on a VLAN or PPPoE interface over one, what cdx counted for it.
+    """
+    for name, item in result.items():
+        if name.startswith('dtsec') and name[5:].isdigit():
+            base = 'dev.dtsec.%s.' % name[5:]
+            cpu = {key: sysctl_u64(base + key) for key in ('cpu_ibytes', 'cpu_obytes', 'cpu_ipackets', 'cpu_opackets')}
+            if None not in cpu.values():
+                item['offloaded bytes received'] = max(0, item['bytes received'] -
+                                                       cpu['cpu_ibytes'] - FCS_BYTES * cpu['cpu_ipackets'])
+                item['offloaded bytes transmitted'] = max(0, item['bytes transmitted'] -
+                                                          cpu['cpu_obytes'] - FCS_BYTES * cpu['cpu_opackets'])
+    raw = sysctl('dev.cdx.stats.offloaded_bytes', 8192)
+    for line in (raw or b'').rstrip(b'\0').decode(errors='replace').splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] in result:
+            result[parts[0]]['offloaded bytes received'] = int(parts[1])
+            result[parts[0]]['offloaded bytes transmitted'] = int(parts[2])
 
 
 def counters():
@@ -98,6 +140,7 @@ def counters():
             ifa = item.ifa_next
     finally:
         libc.freeifaddrs(head)
+    offloaded(result)
     return result
 
 
