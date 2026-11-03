@@ -887,7 +887,7 @@ export default class Traffic extends BaseWidget {
                 '<span class="traffic-header-unit" style="display: inline-block; margin-left: 0.25em;"></span></span>';
             rates = $('<span class="traffic-header-rates" style="white-space: nowrap; overflow: hidden; ' +
                 'font-weight: bold; letter-spacing: -0.03em;">' +
-                part('in', '\u2193', '#5E9C4A', 0) + part('out', '\u2191', '#F28E2B', 48) + '</span>');
+                part('in', '\u2193', '#5E9C4A', 0) + part('out', '\u2191', '#F28E2B', 32) + '</span>');
             slot.append(rates);
         }
         // a size up from the interface names, in their type
@@ -1201,7 +1201,29 @@ export default class Traffic extends BaseWidget {
         super.openEventSource(`/api/diagnostics/traffic/stream/${'1'}`, this._onMessage.bind(this));
     }
 
+    /* Narrowest the widget may be, in CSS px: the header's In/Out key, the
+     * rates centred left of the title and the title itself side by side
+     * without touching (found by eye). The grid sizes in columns,
+     * so this is turned into however many columns the screen gives it. */
+    static MIN_WIDTH = 535;
+
+    _minColumns() {
+        const item = $(`.widget-${this.id}`).closest('.grid-stack-item')[0];
+        const grid = item?.gridstackNode?.grid;
+        const cell = grid?.cellWidth();
+        if (!cell) {
+            return;
+        }
+        const minW = Math.min(grid.getColumn(), Math.ceil(Traffic.MIN_WIDTH / cell));
+        const node = item.gridstackNode;
+        if (node.minW !== minW || node.w < minW) {
+            // the grid keeps a new minimum but doesn't widen to it by itself
+            grid.update(item, {minW: minW, w: Math.max(node.w, minW)});
+        }
+    }
+
     onWidgetResize(elem, width, height) {
+        this._minColumns();
         this._placeToggle();
         // as many names to a page as the new width holds
         if (this.rowData) {
