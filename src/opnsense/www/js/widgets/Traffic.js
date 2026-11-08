@@ -941,10 +941,14 @@ export default class Traffic extends BaseWidget {
             return;
         }
         this.headerPlace = place;
-        const box = rates[0].getBoundingClientRect();
-        const gap = (down[0].getBoundingClientRect().right + up[0].getBoundingClientRect().left) / 2 - box.left;
+        // the gap's middle as it is with the usual 32 px between In and Out
+        const inEnd = down[0].getBoundingClientRect().right - rates[0].getBoundingClientRect().left;
+        const gap = inEnd + 16;
         const left = Math.max(lineX - gap, keyRight + 8);
         rates.css('margin-left', `${Math.max(0, left - slot.left)}px`);
+        // pushed right by the key: Out as far right of the line as In ends left of it
+        up.css('margin-left', left > lineX - gap ? `${Math.max(12, Math.round(2 * (lineX - (left + inEnd))))}px` : '32px');
+        const box = rates[0].getBoundingClientRect();
         // where the title sits unmoved, then just past the rates if they reach it
         title.css({'position': 'relative', 'left': '0px'});
         const natural = title[0].getBoundingClientRect();
@@ -1248,29 +1252,12 @@ export default class Traffic extends BaseWidget {
         super.openEventSource(`/api/diagnostics/traffic/stream/${'1'}`, this._onMessage.bind(this));
     }
 
-    /* Narrowest the widget may be dragged, in CSS px: the header's In key,
-     * the rates and the title side by side without touching (found by eye).
-     * The grid sizes in columns, so this is turned into however many columns
-     * the screen gives it, at most half the grid. It never widens or moves
-     * the widget: on a narrow window that would push it out of its column. */
-    static MIN_WIDTH = 420;
-
-    _minColumns() {
-        const item = $(`.widget-${this.id}`).closest('.grid-stack-item')[0];
-        const grid = item?.gridstackNode?.grid;
-        const cell = grid?.cellWidth();
-        if (!cell) {
-            return;
-        }
-        const node = item.gridstackNode;
-        const minW = Math.max(1, Math.min(Math.ceil(Traffic.MIN_WIDTH / cell), Math.ceil(grid.getColumn() / 2), node.w));
-        if (node.minW !== minW) {
-            grid.update(item, {minW: minW});
-        }
+    // never narrower than a quarter of the full grid
+    getGridOptions() {
+        return {minW: 3};
     }
 
     onWidgetResize(elem, width, height) {
-        this._minColumns();
         this._placeToggle();
         // as many names to a page as the new width holds
         if (this.rowData) {
