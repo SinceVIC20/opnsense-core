@@ -174,15 +174,22 @@ export default class Traffic extends BaseWidget {
             },
             // close the graph on the right with a line like the axis on the left
             plugins: [{
-                // A line down the graph under the gap between the header's in
-                // and out: they show the rates where it crosses the curves.
+                // A line down the graph at a fifth of its width, under the gap
+                // between the header's in and out: they show the rates where it
+                // crosses the curves.
                 id: 'trafficReference',
                 afterDraw: (chart) => {
-                    const down = $('.traffic-header-in'), up = $('.traffic-header-out');
+                    const down = $('.traffic-header-in');
                     const area = chart.chartArea;
                     const canvas = chart.canvas.getBoundingClientRect();
-                    const x = down.length === 0 ? 0 : Math.round((down[0].getBoundingClientRect().right +
-                        up[0].getBoundingClientRect().left) / 2 - canvas.left) + 0.5;
+                    const x = Math.round(area.left + (area.right - area.left) * 0.2) + 0.5;
+                    // the names refill their pages when the graph's width changed
+                    if (this.view === 'graph' && this.rowData && Math.round(area.right - area.left) !== this.listFor) {
+                        this._graphButtons(this.rowData, this.page);
+                    }
+                    if (this.view === 'graph') {
+                        this._placeHeader(canvas.left + x - 0.5);
+                    }
                     if (this.view !== 'graph' || down.length === 0 || !down.is(':visible') || x < area.left || x > area.right) {
                         this._referenceAbove(null);
                         return;
@@ -565,12 +572,16 @@ export default class Traffic extends BaseWidget {
         const cog = `<i class="fa fa-cog traffic-graph-settings" title="${this.translations.chooseinterfaces}"
             style="flex: 0 0 auto; align-self: center; margin-left: 6px; cursor: pointer; color: #999999;"></i>`;
         this.pages = [shown];
-        if (row.width() > 0 && shown.length > 0) {
+        // the names take at most 0.628 of the graph's width, centred over it
+        const area = this.graph?.chartArea;
+        this.listFor = area ? Math.round(area.right - area.left) : null;
+        const limit = area ? Math.min(row.width(), (area.right - area.left) * 0.628) : row.width();
+        if (limit > 0 && shown.length > 0) {
             row.html(shown.map(name).join('') + arrow('left', true) + arrow('right', true) + cog);
             const widths = row.children().toArray().map(elem => $(elem).css('flex-shrink', 0).outerWidth(true));
             // the cog always, and both arrows should it come to pages
             const all = widths.slice(0, shown.length).reduce((sum, width) => sum + width, 0);
-            const room = row.width() - widths[shown.length + 2] - (all > row.width() - widths[shown.length + 2] ?
+            const room = limit - widths[shown.length + 2] - (all > limit - widths[shown.length + 2] ?
                 widths[shown.length] + widths[shown.length + 1] : 0);
             this.pages = [];
             let current = [], used = 0;
@@ -879,13 +890,13 @@ export default class Traffic extends BaseWidget {
         const slot = $(`#${this.id}-title`).siblings('.widget-header-left');
         let rates = slot.children('.traffic-header-rates');
         if (rates.length === 0) {
-            slot.css({'justify-content': 'center', 'min-width': '0'});
+            slot.css({'justify-content': 'flex-start', 'min-width': '0'});
             const part = (dir, arrow, color, gap) =>
                 `<span class="traffic-header-${dir}" style="display: inline-flex; align-items: baseline; color: ${color}; margin-left: ${gap}px;">` +
                 `<span style="font-size: 1.2em;">${arrow}</span>` +
                 '<span class="traffic-header-number" style="display: inline-block; text-align: right;"></span>' +
                 '<span class="traffic-header-unit" style="display: inline-block; margin-left: 0.25em;"></span></span>';
-            rates = $('<span class="traffic-header-rates" style="white-space: nowrap; overflow: hidden; ' +
+            rates = $('<span class="traffic-header-rates" style="flex: 0 0 auto; white-space: nowrap; overflow: hidden; ' +
                 'font-weight: bold; letter-spacing: -0.03em;">' +
                 part('in', '\u2193', '#5E9C4A', 0) + part('out', '\u2191', '#F28E2B', 32) + '</span>');
             slot.append(rates);
@@ -910,6 +921,40 @@ export default class Traffic extends BaseWidget {
         this._headerValues(this.headerParts ?? [['', ''], ['', '']]);
     }
 
+    /* The rates with their gap over the graph's line, but clear of the In
+     * key, and the title moved right only as far as they need, up to the
+     * icons. Done only when something moved, not on every frame. */
+    _placeHeader(lineX) {
+        const rates = $('.traffic-header-rates');
+        const title = $(`#${this.id}-title`);
+        const down = rates.find('.traffic-header-in'), up = rates.find('.traffic-header-out');
+        if (rates.length === 0 || title.length === 0 || !rates.is(':visible')) {
+            return;
+        }
+        const slot = rates.parent()[0].getBoundingClientRect();
+        const key = $('.traffic-graph-key-in');
+        const keyRight = key.is(':visible') ? key[0].getBoundingClientRect().right : slot.left;
+        const commands = title.siblings('.widget-command-container').children(':visible').first();
+        const place = [lineX, slot.left, slot.right, keyRight, rates[0].offsetWidth, title[0].offsetWidth,
+            commands.length ? commands[0].getBoundingClientRect().left : 0].map(Math.round).join();
+        if (place === this.headerPlace) {
+            return;
+        }
+        this.headerPlace = place;
+        const box = rates[0].getBoundingClientRect();
+        const gap = (down[0].getBoundingClientRect().right + up[0].getBoundingClientRect().left) / 2 - box.left;
+        const left = Math.max(lineX - gap, keyRight + 8);
+        rates.css('margin-left', `${Math.max(0, left - slot.left)}px`);
+        // where the title sits unmoved, then just past the rates if they reach it
+        title.css({'position': 'relative', 'left': '0px'});
+        const natural = title[0].getBoundingClientRect();
+        let shift = Math.max(0, left + box.width + 16 - natural.left);
+        if (commands.length) {
+            shift = Math.min(shift, Math.max(0, commands[0].getBoundingClientRect().left - 8 - natural.right));
+        }
+        title.css('left', `${shift}px`);
+    }
+
     _setView(view) {
         this.view = view;
         try {
@@ -926,6 +971,8 @@ export default class Traffic extends BaseWidget {
         // the graph stops drawing when not shown, so put its line away here
         if (view !== 'graph') {
             this._referenceAbove(null);
+            $(`#${this.id}-title`).css('left', '0px');
+            this.headerPlace = null;
         }
         $('.traffic-graph-key').css('display', view === 'graph' ? 'inline-block' : 'none');
         // only the shown view needs drawing
@@ -1201,11 +1248,12 @@ export default class Traffic extends BaseWidget {
         super.openEventSource(`/api/diagnostics/traffic/stream/${'1'}`, this._onMessage.bind(this));
     }
 
-    /* Narrowest the widget may be, in CSS px: the header's In/Out key, the
-     * rates centred left of the title and the title itself side by side
-     * without touching (found by eye). The grid sizes in columns,
-     * so this is turned into however many columns the screen gives it. */
-    static MIN_WIDTH = 535;
+    /* Narrowest the widget may be dragged, in CSS px: the header's In key,
+     * the rates and the title side by side without touching (found by eye).
+     * The grid sizes in columns, so this is turned into however many columns
+     * the screen gives it, at most half the grid. It never widens or moves
+     * the widget: on a narrow window that would push it out of its column. */
+    static MIN_WIDTH = 420;
 
     _minColumns() {
         const item = $(`.widget-${this.id}`).closest('.grid-stack-item')[0];
@@ -1214,11 +1262,10 @@ export default class Traffic extends BaseWidget {
         if (!cell) {
             return;
         }
-        const minW = Math.min(grid.getColumn(), Math.ceil(Traffic.MIN_WIDTH / cell));
         const node = item.gridstackNode;
-        if (node.minW !== minW || node.w < minW) {
-            // the grid keeps a new minimum but doesn't widen to it by itself
-            grid.update(item, {minW: minW, w: Math.max(node.w, minW)});
+        const minW = Math.max(1, Math.min(Math.ceil(Traffic.MIN_WIDTH / cell), Math.ceil(grid.getColumn() / 2), node.w));
+        if (node.minW !== minW) {
+            grid.update(item, {minW: minW});
         }
     }
 
