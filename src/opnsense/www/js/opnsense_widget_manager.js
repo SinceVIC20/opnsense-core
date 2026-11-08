@@ -113,8 +113,12 @@ class WidgetManager  {
             try {
                 let configuration = data.dashboard;
                 this.layouts = configuration.layouts ?? null;
+                // the full grid's places, to go back to after a narrow window's layout
+                this.fullLayout = {};
                 configuration.widgets.forEach(item => {
                     this.widgetConfigurations[item.id] = item;
+                    this.fullLayout[item.id] = {id: item.id, x: parseInt(item.x ?? 0), y: parseInt(item.y ?? 0),
+                        w: parseInt(item.w ?? 1)};
                 });
 
                 this.persistedOptions = configuration.options;
@@ -273,14 +277,19 @@ class WidgetManager  {
             if (this.curColCount != curCount) {
                 this.curColCount = curCount;
 
-                if (this.layouts != null && this.curColCount in this.layouts) {
+                // the saved layout for this many columns; the full grid's is the widget list
+                // itself, else the grid scales a narrow layout up into widths it can't place
+                const layout = this.layouts?.[this.curColCount] ??
+                    (this.curColCount === Math.max(...this.grid.opts.columnOpts.breakpoints.map(bp => bp.c)) &&
+                    this.fullLayout ? this.fullLayout : null);
+                if (layout != null) {
                     // sync configurations and layouts, making sure the content
                     // of each widget isn't reset.
                     Object.values(this.widgetConfigurations).forEach(cfg => {
                         delete cfg.content
                     })
 
-                    Object.values(this.layouts).forEach(layout => {
+                    Object.values(this.layouts ?? {}).forEach(layout => {
                         Object.keys(layout).forEach(id => {
                             if (!(id in this.widgetConfigurations)) {
                                 delete layout[id]
@@ -288,8 +297,9 @@ class WidgetManager  {
                         })
                     })
 
-                    // load a known layout based on the current column count
-                    this.grid.load(Object.values({...this.widgetConfigurations, ...this.layouts[this.curColCount]}));
+                    // load a known layout based on the current column count, its places
+                    // merged into each widget's settings rather than replacing them
+                    this.grid.load(Object.values(this.widgetConfigurations).map(cfg => ({...cfg, ...(layout[cfg.id] ?? {})})));
                 } else {
                     this.grid.compact();
                 }
