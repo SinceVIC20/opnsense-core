@@ -5,7 +5,7 @@
     <description>Global interface settings</description>
     <items>
         <disablechecksumoffloading type="BooleanField">
-            <Default>1</Default>
+            <Default>0</Default>
             <Required>Y</Required>
         </disablechecksumoffloading>
         <disablesegmentationoffloading type="BooleanField">
