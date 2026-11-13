@@ -726,6 +726,8 @@
             this.instances = new Map();
             this.options = {};
             this.layouts = {};
+            // the full-width grid's places, last seen at full width
+            this.fullLayout = null;
             this.grid = null;
             this.currentColumnCount = null;
             this.editMode = false;
@@ -752,6 +754,7 @@
                 this._initializeGrid();
 
                 await this._initializeInstances(dashboard.widgets);
+                this._rememberFullLayout();
 
                 document.addEventListener('visibilitychange', this.visibilityHandler);
                 this.resizeAll();
@@ -888,6 +891,11 @@
                 );
                 const columnCount = this.grid.getColumn();
                 this.layouts[columnCount] = {};
+                // saved in a narrow window: keep the full width's places too
+                this._rememberFullLayout();
+                if (columnCount !== this._fullColumnCount() && this.fullLayout !== null) {
+                    this.layouts[this._fullColumnCount()] = {...this.fullLayout};
+                }
 
                 const widgets = await Promise.all([...this.instances.values()].map(async instance => {
                     const {content, callbacks, ...gridConfig} = gridItems.get(instance.id) ?? {};
@@ -1097,7 +1105,12 @@
                 this.grid.on(eventName, () => this._markDirty());
             }
 
-            this.grid.on('change', () => this._syncResponsiveLayout());
+            this.grid.on('change', () => {
+                if (this.grid.getColumn() === this.currentColumnCount) {
+                    this._rememberFullLayout();
+                }
+                this._syncResponsiveLayout();
+            });
 
             this.gridResizeObserver = new ResizeObserver(entries => {
                 const entry = entries[entries.length - 1];
@@ -1109,6 +1122,8 @@
                 this.lastGridWidth = width;
                 clearTimeout(this.gridResizeTimer);
                 this.gridResizeTimer = setTimeout(() => {
+                    // before the grid scales the places to a new column count
+                    this._rememberFullLayout();
                     this.grid.checkDynamicColumn();
                     this._syncResponsiveLayout();
                 }, this.grid.opts.cellHeightThrottle ?? 100);
@@ -1123,7 +1138,10 @@
         }
 
         _applyLayout(columnCount) {
-            const layout = this.layouts[columnCount];
+            // without a saved full-width layout, the grid would scale a
+            // narrow one up into widths it can't place
+            const layout = this.layouts[columnCount] ??
+                (columnCount === this._fullColumnCount() ? this._fullLayoutFallback() : null);
             if (!layout) {
                 this.grid.compact();
                 return;
@@ -1144,6 +1162,35 @@
 
             this.currentColumnCount = columnCount;
             this._applyLayout(columnCount);
+        }
+
+        _fullColumnCount() {
+            const breakpoints = this.grid.opts.columnOpts?.breakpoints ?? [];
+            return Math.max(this.grid.opts.column ?? 12, ...breakpoints.map(bp => bp.c));
+        }
+
+        _rememberFullLayout() {
+            if (this.currentColumnCount === this._fullColumnCount() && this.instances.size > 0) {
+                this.fullLayout = Object.fromEntries(
+                    [...this.instances.values()].map(instance => [instance.id, this._readLayout(instance)])
+                );
+            }
+        }
+
+        // the full width's places: as last seen there, else the widget list's own
+        _fullLayoutFallback() {
+            if (this.fullLayout !== null) {
+                return this.fullLayout;
+            }
+            const layout = {};
+            for (const instance of this.instances.values()) {
+                const {x, y, w} = instance.persistedConfig;
+                if (x === undefined || y === undefined) {
+                    return null;
+                }
+                layout[instance.id] = {id: instance.id, x: parseInt(x), y: parseInt(y), w: parseInt(w ?? 1)};
+            }
+            return layout;
         }
 
         _readLayout(instance) {
