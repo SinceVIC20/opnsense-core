@@ -411,6 +411,10 @@
             this.tickRunning = false;
             this.refreshPending = false;
             this.refreshMissed = false;
+            // delay of this widget's first scheduled refresh and of its
+            // catch-up on return, set by the manager
+            this.tickOffset = 0;
+            this.returnOffset = 0;
 
             const config = {
                 ...persistedConfig,
@@ -559,7 +563,8 @@
                 // catch up on return only if a refresh fell due while hidden
                 if (visible && this.refreshMissed) {
                     this.refreshMissed = false;
-                    this.refresh();
+                    // spread out like the scheduled refreshes
+                    this.tickTimer = setTimeout(() => this.refresh(), this.returnOffset);
                 }
             }
         }
@@ -665,10 +670,12 @@
                     this.refreshPending = false;
                     global.queueMicrotask(() => this.refresh());
                 } else if (!this.destroyed) {
+                    const interval = this.widget.tickTimeout * 1000;
                     this.tickTimer = setTimeout(
                         () => this._scheduledRefresh(),
-                        this.widget.tickTimeout * 1000
+                        interval + this.tickOffset % interval
                     );
+                    this.tickOffset = 0;
                 }
             }
         }
@@ -1058,6 +1065,9 @@
                 translations: this.translations,
                 onResizeRequested: id => this.resizeInstance(id)
             });
+            // Widgets loaded together would all refresh on the same second, a
+            // burst of scripts on the firewall: start each one a little later.
+            instance.tickOffset = instance.returnOffset = (this.instances.size * 2000) % 30000;
             this.instances.set(instanceId, instance);
             return instance;
         }
